@@ -1,0 +1,307 @@
+---
+title: "presentazioneFinale"
+author: "Brotto Cristian 152104"
+date: "1/2/2022"
+output: powerpoint_presentation
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,warning = FALSE)
+```
+
+# IMPORT LIBRERIE
+```{r,include=FALSE,warning=FALSE}
+library("ggplot2")
+library("dplyr")
+library("tidyverse")
+library("corrplot")
+library("ggpubr")
+library("wordcloud")
+library("ggforce")
+theme_set(theme_bw())
+```
+## CORREZIONI DATASET
+```{r,iclude=FALSE,warning=FALSE}
+auto1 <- read.csv("C:/_UNIUD/FONDAMENTI DI SCIENZA E DATI DI LABORATORIO/R/__PROGETTO/auto/auto1.csv")
+attach(auto1)
+#-------------------------------------------------------------------------------------------------------------------------------------
+#rinominare bugatti veyron
+auto1[Make=="Bugatti",2]="Veyron"
+
+#-VALORI MANCANTI TESLA
+auto1$Engine.HP[6922:6939]=c(362,302,691,416,#2014
+                     380,329,422,691,380,#2015
+                     518,350,503,382,500,500,500,442,315)
+#79900$=362hp
+#69900$=302hp
+#values from: https://www.cars.com/research/tesla-model_s-2014/trims/
+
+#LE AUTO ELETTRICHE HANNO 0 CILINDRI
+auto1$Engine.Cylinders[auto1$Engine.Fuel.Type=="electric"]=0
+
+#TOGLIERE AUTO CON COMBUSTIBILE NON SPECIFICATO
+auto1$Engine.Fuel.Type[auto1$Engine.Fuel.Type==""]=NA
+#Engine.Fuel.Type[11322:11324]=NA
+filter(auto1,is.na(Engine.Fuel.Type))#controllo
+levels(as.factor(Engine.Fuel.Type))
+
+#contare i valori NA o NAN per colonna
+i=1
+while(i<ncol(auto1)){
+  print(sum(is.na(auto1[i])))
+  i=i+1
+}
+
+#cancellare osservazioni con NA
+auto1=auto1 %>% drop_na()
+#write.csv(auto1,"C:/_UNIUD/FONDAMENTI DI SCIENZA E DATI DI LABORATORIO/R/__PROGETTO/auto/auto1Correct.csv")
+#auto1=read.csv("C:/_UNIUD/FONDAMENTI DI SCIENZA E DATI DI LABORATORIO/R/__PROGETTO/auto/auto1Correct.csv")
+
+#COMPUTAZIONE MATRICE DI CORRELAZIONE
+myData=auto1[,c(5,6,15,16)]
+res=round(cor(myData),2)
+
+```
+
+##STATISTICHE TOTALI E PARZIALI CATEGORIE
+```{r,iclude=FALSE,warning=FALSE}
+nPerMarca=c(count(auto1,Make)[2])$n
+marcheAuto=levels(as.factor(Make))
+```
+
+
+
+
+
+
+# Quali caratteristiche influenzano in modo significativo il prezzo di un auto ? What cars can be consider overpriced?
+
+## 1. Make ? 
+```{r,echo=FALSE}
+i=1
+mediaMSRPPerMarca<-c()
+while (i<=length(marcheAuto)){
+  meanMSRP=auto1 %>% 
+    filter(Make==marcheAuto[i]) %>% 
+    mutate(avgMSRP=mean(MSRP[Make==marcheAuto[i]],na.rm = T)) %>% 
+    select(avgMSRP) %>% 
+    head(1)
+  mediaMSRPPerMarca<-c(mediaMSRPPerMarca,meanMSRP$avgMSRP)
+  i=i+1
+}
+
+marcaAndMSRP=data.frame(marcheAuto,round(mediaMSRPPerMarca,0),0)
+names(marcaAndMSRP)=c("marcheAuto","mediaMSRPPerMarca","Highlighted")
+
+newDF=data.frame("Media",mean(auto1$MSRP),1)
+names(newDF)=c("marcheAuto","mediaMSRPPerMarca","Highlighted")
+marcaAndMSRP=rbind(marcaAndMSRP,newDF)
+
+ggplot(marcaAndMSRP,aes(y=reorder(marcheAuto,mediaMSRPPerMarca),mediaMSRPPerMarca,fill=factor(Highlighted)))+
+  geom_col(width=0.8,show.legend=FALSE)+
+  labs(x="MSRP", y= "Marca",title="Marca vs MSRP")+
+  theme(legend.position = "none")+
+  scale_x_continuous(breaks = c(seq(0,2000000,250000)))
+
+filtro=filter(marcaAndMSRP,mediaMSRPPerMarca<375000)
+ggplot(filtro,aes(y=reorder(marcheAuto,mediaMSRPPerMarca),mediaMSRPPerMarca,fill=factor(Highlighted)))+
+  geom_col(width=0.8,show.legend=FALSE)+
+  labs(x="MSRP", y= "Marca",title="Marca vs MSRP")+
+  theme(legend.position = "none")+
+  scale_x_continuous(breaks = c(seq(0,375000,50000)))
+
+```
+### Le marche che producono auto di lusso o hypercar sono le più costose. Viceversa quelle che producono perlopiù utilitarie sono le più economiche.
+
+
+
+## 2. Engine HP ? 
+```{r,echo=FALSE,warning=FALSE}
+
+auto1.3=
+  group_by(auto1,Make,Model) %>%
+  mutate(avgHP=mean(Engine.HP)) %>%
+  mutate(avgMSRP=mean(MSRP)) %>%
+  summarise(Make,Model,avgHP,avgMSRP) %>% 
+  group_by(Make,Model,avgHP,avgMSRP) %>% 
+  summarise()
+ggplot(auto1.3,aes(avgHP,avgMSRP))+
+  geom_point(alpha=1/5)+
+  geom_smooth()+
+  geom_rug(alpha=1/10)+
+  labs(title="Cavalli e MSRP di ogni modello",x="Cavalli",y="MSRP")+
+  scale_x_continuous(breaks = c(seq(0,1000,100)))+
+  geom_text(label=ifelse(auto1.3$avgMSRP>500000|
+                           auto1.3$avgHP>700,auto1.3$Model,"")
+             ,check_overlap=F
+            ,nudge_x = -0,nudge_y = 50000,size=3)+
+  scale_y_continuous(breaks = c(70000,seq(0,2000000,250000)))
+
+#---------------------------
+
+mediaTotale=mean(Engine.HP,na.rm = T)
+i=1
+mediaHpPerMarca<-c()
+while (i<=length(marcheAuto)){
+  meanHP=auto1 %>% 
+    filter(Make==marcheAuto[i]) %>% 
+    mutate(avgHP=mean(Engine.HP,na.rm = T)) %>% 
+    select(avgHP) %>% 
+    head(1)
+  mediaHpPerMarca=c(mediaHpPerMarca,meanHP$avgHP)
+  i=i+1
+}
+marcaAndHP=data.frame(marcheAuto,mediaHpPerMarca,0)
+names(marcaAndHP)=c("marcheAuto","mediaHpPerMarca","Highlighted")
+newDF=data.frame("Media",mediaTotale,1)
+names(newDF)=c("marcheAuto","mediaHpPerMarca","Highlighted")
+marcaAndHP=rbind(marcaAndHP,newDF)
+
+data=marcaAndHP
+data=filter(data,marcheAuto!="Media")
+colnames(data)=c("marca","n","NOT")
+set.seed(1000)
+wordcloud(words = data$marca, freq = data$n,max.words = 1000,min.freq = 0,random.order = F,colors=brewer.pal(8, "Dark2"))
+
+corrplot(res[1,4, drop=FALSE],addCoef.col = 'black',tl.col="black",tl.srt=90,number.cex=4,tl.cex = 2,cl.pos = "r")
+
+```
+
+## 3. Engine Cylinders ? 
+```{r,echo=FALSE,warning=FALSE}
+
+auto1.4=
+  group_by(auto1,Make,Model) %>%
+  mutate(avgCyl=mean(Engine.Cylinders)) %>%
+  mutate(avgMSRP=mean(MSRP)) %>%
+  summarise(Make,Model,avgCyl,avgMSRP) %>% 
+  group_by(Make,Model,avgCyl,avgMSRP) %>% 
+  summarise()
+
+set.seed(10000)
+ggplot(auto1.4,aes(avgCyl,avgMSRP))+
+  geom_jitter(alpha=1/4)+
+  geom_smooth()+
+  geom_rug(alpha=1/10)+
+  labs(x="Cilindri", y="MSRP",title="Cilindri e MSRP di ogni modello")+
+  scale_x_continuous(breaks = c(seq(0,16,1)))+
+  scale_y_continuous(breaks = c(70000,seq(0,2000000,250000)))+
+  theme(legend.position="none")+
+  geom_text(label=ifelse(auto1.4$avgMSRP>550000|
+                           (auto1.4$avgCyl==8&auto1.4$avgMSRP>450000)|
+                           (auto1.4$avgCyl==10&auto1.4$avgMSRP>400000)|
+                           auto1.4$Make=="Tesla"
+                         ,auto1.4$Model,"")
+             ,check_overlap=F
+            ,nudge_x = -0.2,nudge_y = 60000,size=3)
+
+i=1
+mediaCylPerMarca<-c()
+while (i<=length(marcheAuto)){
+  meanCyl=auto1 %>% 
+    filter(Make==marcheAuto[i]) %>% 
+    mutate(avgCyl=mean(Engine.Cylinders[Make==marcheAuto[i]],na.rm = T)) %>% 
+    select(avgCyl) %>% 
+    head(1)
+  mediaCylPerMarca<-c(mediaCylPerMarca,meanCyl$avgCyl)
+  i=i+1
+}
+
+marcaAndCyl=data.frame(marcheAuto,mediaCylPerMarca,0)#????
+names(marcaAndCyl)=c("marcheAuto","mediaCylPerMarca","Highlighted")
+newDF=data.frame("Media",mean(auto1$Engine.Cylinders),1)
+names(newDF)=c("marcheAuto","mediaCylPerMarca","Highlighted")
+marcaAndCyl=rbind(marcaAndCyl,newDF)
+data=inner_join(marcaAndCyl,marcaAndMSRP,by="marcheAuto")
+
+data=filter(data,marcheAuto!="Media")
+colnames(data)=c("marca","n")
+wordcloud(words = data$marca, freq = data$n,max.words = 100,min.freq = -1,random.order = F,colors=brewer.pal(8, "Dark2"),scale=c(2.5,0.1))
+
+corrplot(res[2,4, drop=FALSE],addCoef.col = 'black',tl.col="black",tl.srt=0,number.cex=4,tl.cex = 2,cl.pos = "r")
+
+
+```
+
+
+## 4. IN BASE AL TIPO DI CARBURANTE? 
+```{r}
+
+auto1.8=group_by(auto1,Engine.Fuel.Type) %>%
+  mutate(avgMSRP=mean(MSRP),median=median(MSRP)) %>%
+  distinct(Engine.Fuel.Type,avgMSRP,median) %>%
+  ungroup() %>% 
+  filter(Engine.Fuel.Type!="flex-fuel (unleaded/E85)"&
+           Engine.Fuel.Type!="flex-fuel (premium unleaded recommended/E85)"&
+           Engine.Fuel.Type!="flex-fuel (premium unleaded required/E85)"&
+           Engine.Fuel.Type!="premium unleaded (recommended)"&
+           Engine.Fuel.Type!="natural gas")
+
+ggplot(auto1.8,aes(y=reorder(Engine.Fuel.Type,avgMSRP),avgMSRP,fill=Engine.Fuel.Type))+
+  geom_col(show.legend = F)+
+  labs(title="",x="MSRP",y="Tipo di alimentazione")+
+  scale_x_continuous(breaks = c(seq(0,200000,25000)))
+
+
+```
+
+
+## 5. IN BASE AL TIPO DI TRASMISSIONE? 
+```{r}
+
+auto1.7=group_by(auto1,Transmission.Type) %>%
+  mutate(avgMSRP=mean(MSRP),median=median(MSRP)) %>%
+  distinct(Transmission.Type,avgMSRP,median) %>%
+  ungroup() %>%
+  filter(Transmission.Type!="UNKNOWN")
+
+ggplot(auto1.7,aes(y=reorder(Transmission.Type,avgMSRP),avgMSRP,fill=Transmission.Type))+
+  geom_col()+
+  labs(title="",x="MSRP",y="Tipo di trasmissione")+
+  theme(legend.position="none")
+
+```
+
+## 6. Popularity ? 
+```{r,echo=FALSE}
+
+mediaTotale=mean(Popularity,na.rm = T)
+i=1
+mediaPopPerMarca<-c()
+while (i<=length(marcheAuto)){
+  meanPop=auto1 %>% 
+    filter(Make==marcheAuto[i]) %>% 
+    mutate(avgPop=mean(Popularity,na.rm = T)) %>% 
+    select(avgPop) %>% 
+    head(1)
+  mediaPopPerMarca=c(mediaPopPerMarca,meanPop$avgPop)
+  i=i+1
+}
+marcaAndPopularity=data.frame(marcheAuto,mediaPopPerMarca,0)
+names(marcaAndPopularity)=c("marcheAuto","mediaPopPerMarca","Highlighted")
+newDF=data.frame("Media",mediaTotale,1)
+names(newDF)=c("marcheAuto","mediaPopPerMarca","Highlighted")
+marcaAndPopularity=rbind(marcaAndPopularity,newDF)
+
+data=inner_join(marcaAndPopularity,marcaAndMSRP,by="marcheAuto")
+
+ggplot(data,aes(mediaPopPerMarca,mediaMSRPPerMarca))+
+  geom_point()+
+  geom_text(aes(label=ifelse(mediaMSRPPerMarca>300000|mediaPopPerMarca>2500,as.character(marcheAuto),''))
+            ,hjust=0.3,vjust=-0.4
+            ,check_overlap = F
+            ,colour="black")+
+  scale_x_continuous(breaks = c(seq(0,7000,500)))+
+  scale_y_continuous(breaks = c(seq(0,2000000,250000)))+
+  labs(title = "",x="Popolarità",y="MSRP")
+
+
+data=marcaAndPopularity
+data=filter(data,marcheAuto!="Media")
+colnames(data)=c("marca","n","NOT")
+wordcloud(words = data$marca, freq = data$n,max.words = 1000,colors=brewer.pal(8, "Dark2"))
+
+
+```
+
